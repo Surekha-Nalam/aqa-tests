@@ -16,10 +16,11 @@ NPROCS:=1
 MEMORY_SIZE:=1024
 
 OS:=$(shell uname -s)
+ARCH:=$(shell uname -m)
 
 ifeq ($(OS),Linux)
 	NPROCS:=$(shell grep -c ^processor /proc/cpuinfo)
-	MEMORY_SIZE:=$(shell KMEMMB=`awk '/^MemTotal:/{print int($$2/1024)}' /proc/meminfo`; if [ -r /sys/fs/cgroup/memory/memory.limit_in_bytes ]; then CGMEM=`cat /sys/fs/cgroup/memory/memory.limit_in_bytes`; else CGMEM=`expr $${KMEMMB} \* 1024`; fi; CGMEMMB=`expr $${CGMEM} / 1048576`; if [ "$${KMEMMB}" -lt "$${CGMEMMB}" ]; then echo "$${KMEMMB}"; else echo "$${CGMEMMB}"; fi)
+	MEMORY_SIZE:=$(shell KMEMMB=`awk '/^MemTotal:/{print int($$2/1024)}' /proc/meminfo`; if [ -r /sys/fs/cgroup/memory/memory.limit_in_bytes ]; then CGMEM=`cat /sys/fs/cgroup/memory/memory.limit_in_bytes`; else CGMEM=`expr $${KMEMMB} \* 1024`; fi; CGMEMMB=`expr $${CGMEM} / 1024`; if [ "$${KMEMMB}" -lt "$${CGMEMMB}" ]; then echo "$${KMEMMB}"; else echo "$${CGMEMMB}"; fi)
 endif
 ifeq ($(OS),Darwin)
 	NPROCS:=$(shell sysctl -n hw.ncpu)
@@ -46,7 +47,7 @@ endif
 # Upstream OpenJDK, roughly, sets concurrency based on the
 # following: min(NPROCS/2, MEM_IN_GB/2).
 MEM := $(shell expr $(MEMORY_SIZE) / 2048)
-CORE := $(shell expr $(NPROCS) / 2)
+CORE := $(shell expr $(NPROCS) / 2 + 1)
 CONC := $(CORE)
 ifeq ($(shell expr $(CORE) \> $(MEM)), 1)
 	CONC := $(MEM)
@@ -78,11 +79,16 @@ JTREG_BASIC_OPTIONS += -retain:fail,error,*.dmp,javacore.*,heapdump.*,*.trc
 # Ignore tests are not run and completely silent about it
 JTREG_IGNORE_OPTION = -ignore:quiet
 JTREG_BASIC_OPTIONS += $(JTREG_IGNORE_OPTION)
+# riscv64 machines aren't very fast (yet!!)
+ifeq ($(ARCH), riscv64)
+	JTREG_TIMEOUT_OPTION = -timeoutFactor:16
+else
 # Multiple by 8 the timeout numbers, except on zOS use 2
 ifneq ($(OS),OS/390)
 	JTREG_TIMEOUT_OPTION =  -timeoutFactor:8
 else
 	JTREG_TIMEOUT_OPTION =  -timeoutFactor:2
+endif
 endif
 JTREG_BASIC_OPTIONS += $(JTREG_TIMEOUT_OPTION)
 # Create junit xml
@@ -94,6 +100,11 @@ VMOPTION_HEADLESS :=
 libcVendor = $(shell ldd --version 2>&1 | sed -n '1s/.*\(musl\).*/\1/p')
 
 ifeq ($(libcVendor),musl)
+	JTREG_KEY_OPTIONS := -k:'!headful'
+	VMOPTION_HEADLESS := -Djava.awt.headless=true
+endif
+# RISC-V is built in headless mode for now. See https://github.com/adoptium/ci-jenkins-pipelines/pull/867
+ifeq ($(ARCH),riscv64)
 	JTREG_KEY_OPTIONS := -k:'!headful'
 	VMOPTION_HEADLESS := -Djava.awt.headless=true
 endif
@@ -178,6 +189,7 @@ ifneq ($(filter openj9 ibm, $(JDK_IMPL)),)
 	TEST_VARIATION_JIT_PREVIEW:=-XX:-JITServerTechPreviewMessage
 	TEST_VARIATION_JIT_AGGRESIVE:=-Xjit:enableAggressiveLiveness
 	TIMEOUT_HANDLER:=-timeoutHandler:jtreg.openj9.CoreDumpTimeoutHandler -timeoutHandlerDir:$(Q)$(LIB_DIR)$(D)openj9jtregtimeouthandler.jar$(Q)
+	EXTRA_OPTIONS := -Xverbosegclog $(EXTRA_OPTIONS)
 endif
 
 # if cannot find the problem list file, set to default file
@@ -192,13 +204,18 @@ ifneq ($(filter 11 16, $(JDK_VERSION)),)
 endif
 
 FEATURE_PROBLEM_LIST_FILE:=
-ifneq (,$(findstring FIPS, $(TEST_FLAG))) 
-	FEATURE_PROBLEM_LIST_FILE:=-exclude:$(Q)$(JTREG_JDK_TEST_DIR)$(D)ProblemList-fips.txt$(Q)
+ifneq (,$(findstring FIPS140_2, $(TEST_FLAG))) 
+	FEATURE_PROBLEM_LIST_FILE:=-exclude:$(Q)$(JTREG_JDK_TEST_DIR)$(D)ProblemList-FIPS140_2.txt$(Q)
+else ifneq (,$(findstring FIPS140_3_OpenJCEPlus, $(TEST_FLAG)))
+	FEATURE_PROBLEM_LIST_FILE:=-exclude:$(Q)$(JTREG_JDK_TEST_DIR)$(D)ProblemList-FIPS140_3_OpenJcePlus.txt$(Q)
 endif
 
 VENDOR_PROBLEM_LIST_FILE:=
 ifeq ($(JDK_VENDOR),$(filter $(JDK_VENDOR),redhat azul alibaba microsoft))
-	VENDOR_PROBLEM_LIST_FILE:=-exclude:$(Q)$(TEST_ROOT)$(D)openjdk$(D)excludes$(D)vendors$(D)$(JDK_VENDOR)$(D)ProblemList_openjdk$(JDK_VERSION).txt$(Q)
+	VENDOR_FILE:=excludes$(D)vendors$(D)$(JDK_VENDOR)$(D)ProblemList_openjdk$(JDK_VERSION).txt
+	ifneq (,$(wildcard $(VENDOR_FILE)))
+		VENDOR_PROBLEM_LIST_FILE:=-exclude:$(Q)$(TEST_ROOT)$(D)openjdk$(D)$(VENDOR_FILE)$(Q)
+	endif
 endif
 
 # --add-modules jdk.incubator.foreign is removed for JDK19+

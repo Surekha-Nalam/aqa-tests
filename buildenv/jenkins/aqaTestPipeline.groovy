@@ -16,6 +16,9 @@ def LABEL_ADDITION = (params.LABEL_ADDITION) ?: ""
 def TEST_FLAG = (params.TEST_FLAG) ?: ""
 def APPLICATION_OPTIONS = (params.APPLICATION_OPTIONS) ?: ""
 def SETUP_JCK_RUN = params.SETUP_JCK_RUN ?: false
+def LIGHT_WEIGHT_CHECKOUT = params.LIGHT_WEIGHT_CHECKOUT ?: false
+def DOCKER_REGISTRY_URL = (params.DOCKER_REGISTRY_URL) ?: ""
+def DOCKER_REGISTRY_URL_CREDENTIAL_ID = (params.DOCKER_REGISTRY_URL_CREDENTIAL_ID) ?: ""
 
 
 // Use BUILD_USER_ID if set and jdk-JDK_VERSIONS
@@ -31,6 +34,8 @@ def suffix = ""
 if (TEST_FLAG) {
     suffix = "_" + TEST_FLAG.toLowerCase().trim()
 }
+
+def fail = false
 JDK_VERSIONS.each { JDK_VERSION ->
     PLATFORMS.each { PLATFORM ->
         String[] tokens = PLATFORM.split('_')
@@ -57,7 +62,7 @@ JDK_VERSIONS.each { JDK_VERSION ->
 
         if (SDK_RESOURCE == "customized" ) {
             if (params.TOP_LEVEL_SDK_URL) {
-                // example: <jenkins_url>/job/build-scripts/job/openjdk11-pipeline/123/artifact/target/linux/aarch64/openj9/*_aarch64_linux_*.tar.gz/*zip*/openj9.zip 
+                // example: <jenkins_url>/job/build-scripts/job/openjdk11-pipeline/123/artifact/target/linux/aarch64/openj9/*_aarch64_linux_*.tar.gz/*zip*/openj9.zip
                 download_url = params.TOP_LEVEL_SDK_URL + "artifact/target/${os}/${arch}/${params.VARIANT}/${filter}/*zip*/${params.VARIANT}.zip"
             }
         } else if (SDK_RESOURCE == "releases") {
@@ -88,12 +93,13 @@ JDK_VERSIONS.each { JDK_VERSION ->
                 def level = targetTokens[0];
                 def group = targetTokens[1];
                 def parameters = [
+                    string(name: 'TEST_JOB_NAME', value: TEST_JOB_NAME),
                     string(name: 'LEVELS', value: level),
                     string(name: 'GROUPS', value: group),
                     string(name: 'JDK_VERSIONS', value: JDK_VERSION),
                     string(name: 'ARCH_OS_LIST', value: PLATFORM),
                     string(name: 'JDK_IMPL', value: jdk_impl),
-                    booleanParam(name: 'LIGHT_WEIGHT_CHECKOUT', value: false)
+                    booleanParam(name: 'LIGHT_WEIGHT_CHECKOUT', value: LIGHT_WEIGHT_CHECKOUT)
                 ]
                 build job: 'Test_Job_Auto_Gen', parameters: parameters, propagate: true
             }
@@ -111,18 +117,20 @@ JDK_VERSIONS.each { JDK_VERSION ->
                         string(name: 'PARALLEL', value: PARALLEL),
                         string(name: 'NUM_MACHINES', value: NUM_MACHINES.toString()),
                         booleanParam(name: 'GENERATE_JOBS', value: AUTO_AQA_GEN),
-                        booleanParam(name: 'LIGHT_WEIGHT_CHECKOUT', value: false),
+                        booleanParam(name: 'LIGHT_WEIGHT_CHECKOUT', value: LIGHT_WEIGHT_CHECKOUT),
                         string(name: 'TIME_LIMIT', value: TIME_LIMIT.toString()),
                         string(name: 'TRSS_URL', value: TRSS_URL),
                         string(name: 'LABEL', value: LABEL),
                         string(name: 'LABEL_ADDITION', value: LABEL_ADDITION),
                         string(name: 'TEST_FLAG', value: TEST_FLAG),
                         string(name: 'APPLICATION_OPTIONS', value: APPLICATION_OPTIONS),
+                        string(name: 'DOCKER_REGISTRY_URL', value: DOCKER_REGISTRY_URL),
+                        string(name: 'DOCKER_REGISTRY_URL_CREDENTIAL_ID', value: DOCKER_REGISTRY_URL_CREDENTIAL_ID),
                         booleanParam(name: 'KEEP_REPORTDIR', value: keep_reportdir),
                         booleanParam(name: 'SETUP_JCK_RUN', value: SETUP_JCK_RUN)
                     ], wait: true
-                    def result = downstreamJob.getResult()
-                    echo " ${TEST_JOB_NAME} result is ${result}"
+                    def downstreamJobResult = downstreamJob.getResult()
+                    echo " ${TEST_JOB_NAME} result is ${downstreamJobResult}"
                     if (downstreamJob.getResult() == 'SUCCESS' || downstreamJob.getResult() == 'UNSTABLE') {
                         echo "[NODE SHIFT] MOVING INTO CONTROLLER NODE..."
                         node("worker || (ci.role.test&&hw.arch.x86&&sw.os.linux)") {
@@ -138,6 +146,7 @@ JDK_VERSIONS.each { JDK_VERSION ->
                                     )
                                 }
                             } catch (Exception e) {
+                                echo 'Exception: ' + e.toString()
                                 echo "Cannot run copyArtifacts from job ${TEST_JOB_NAME}. Skipping copyArtifacts..."
                             }
                             try {
@@ -145,12 +154,13 @@ JDK_VERSIONS.each { JDK_VERSION ->
                                     archiveArtifacts artifacts: "*.tap", fingerprint: true
                                 }
                             } catch (Exception e) {
+                                echo 'Exception: ' + e.toString()
                                 echo "Cannot archiveArtifacts from job ${TEST_JOB_NAME}. "
                             }
                         }
-                    } else {
-                        echo " ${TEST_JOB_NAME} result is ${result}"
-                        currentBuild.result = "FAILURE"
+                    }
+                    if (downstreamJobResult != "SUCCESS") {
+                        fail = true
                     }
                 }
             } else {
@@ -160,3 +170,7 @@ JDK_VERSIONS.each { JDK_VERSION ->
     }
 }
 parallel JOBS
+if (fail) {
+    currentBuild.result = "FAILURE"
+}
+

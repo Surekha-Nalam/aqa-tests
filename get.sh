@@ -165,12 +165,12 @@ getBinaryOpenjdk()
 {
 	echo "get jdk binary..."
 	cd $SDKDIR
-	mkdir -p openjdkbinary
-	cd openjdkbinary
+	mkdir -p jdkbinary
+	cd jdkbinary
 
 	if [ "$SDK_RESOURCE" != "upstream" ]; then
-		if [ "$(ls -A $SDKDIR/openjdkbinary)" ]; then
-			echo "$SDKDIR/openjdkbinary is not an empty directory, please empty it or specify a different SDK directory."
+		if [ "$(ls -A $SDKDIR/jdkbinary)" ]; then
+			echo "$SDKDIR/jdkbinary is not an empty directory, please empty it or specify a different SDK directory."
 			echo "This directory is used to download SDK resources into it and the script will not overwrite its contents."
 			exit 1
 		fi
@@ -307,79 +307,80 @@ getBinaryOpenjdk()
 		done
 	fi
 
-	jar_files=`ls`
-	jar_file_array=(${jar_files//\\n/ })
-	last_index=$(( ${#jar_file_array[@]} - 1 ))
+	jdk_files=`ls`
+	jdk_file_array=(${jdk_files//\\n/ })
+	last_index=$(( ${#jdk_file_array[@]} - 1 ))
 
 	if [[ $last_index == 0 ]]; then
 		if [[ $download_url =~ '*.tar.gz' ]] || [[ $download_url =~ '*.zip' ]]; then
-			nested_zip="${jar_file_array[0]}"
+			nested_zip="${jdk_file_array[0]}"
 			echo "${nested_zip} is a nested zip"
 			unzip -q $nested_zip -d .
 			rm $nested_zip
-			jar_files=`ls *jdk*.tar.gz *jre*.tar.gz *testimage*.tar.gz *debugimage*.tar.gz *jdk*.zip *jre*.zip *testimage*.zip *debugimage*.zip 2> /dev/null || true`
+			jdk_files=`ls *jdk*.tar.gz *jre*.tar.gz *testimage*.tar.gz *debugimage*.tar.gz *jdk*.zip *jre*.zip *testimage*.zip *debugimage*.zip 2> /dev/null || true`
 			echo "Found files under ${nested_zip}:"
-			echo "${jar_files}"
-			jar_file_array=(${jar_files//\\n/ })
-			last_index=$(( ${#jar_file_array[@]} - 1 ))
+			echo "${jdk_files}"
+			jdk_file_array=(${jdk_files//\\n/ })
+			last_index=$(( ${#jdk_file_array[@]} - 1 ))
 		fi
 	fi
 
-	# if $jar_file_array contains debug-image, move debug-image element to the end of the array
+	# if $jdk_file_array contains debug-image, move debug-image element to the end of the array
 	# debug image jar needs to be extracted after jdk as debug image jar extraction location depends on jdk structure
 	# debug image jar extracts into j2sdk-image/jre dir if it exists. Otherwise, extracts into j2sdk-image dir
-	for i in "${!jar_file_array[@]}"; do
-		if [[ "${jar_file_array[$i]}" =~ "debug-image" ]] || [[ "${jar_file_array[$i]}" =~ "debugimage" ]]; then
+	for i in "${!jdk_file_array[@]}"; do
+		if [[ "${jdk_file_array[$i]}" =~ "debug-image" ]] || [[ "${jdk_file_array[$i]}" =~ "debugimage" ]]; then
 			if [ "$i" -ne "$last_index" ]; then
-				debug_image_jar="${jar_file_array[$i]}"
+				debug_image_jar="${jdk_file_array[$i]}"
 
 				# remove the element
-				unset jar_file_array[$i]
+				unset jdk_file_array[$i]
 
 				# add $debug_image_jar to the end of the array
-				jar_file_array=( "${jar_file_array[@]}" "${debug_image_jar}" )
+				jdk_file_array=( "${jdk_file_array[@]}" "${debug_image_jar}" )
 				break
 			fi
 		fi
 	done
 
-	for jar_name in "${jar_file_array[@]}"
-		do
-			# if jar_name contains debug-image, extract into j2sdk-image/jre or j2sdk-image dir
-			# Otherwise, files will be extracted under ./tmp
-			if [[ "$jar_name" =~ "debug-image" ]] || [[ "$jar_name" =~ "debugimage" ]]; then
+	for file_name in "${jdk_file_array[@]}"
+	do
+		if [[ ! "$file_name" =~ "sbom" ]]; then
+			if [[ "$file_name" =~ "debug-image" ]] || [[ "$file_name" =~ "debugimage" ]]; then
+				# if file_name contains debug-image, extract into j2sdk-image/jre or j2sdk-image dir
+				# Otherwise, files will be extracted under ./tmp
 				extract_dir="./j2sdk-image"
-				if [ -d "$SDKDIR/openjdkbinary/j2sdk-image/jre" ]; then
+				if [ -d "$SDKDIR/jdkbinary/j2sdk-image/jre" ]; then
 					extract_dir="./j2sdk-image/jre"
 				fi
-				echo "Uncompressing $jar_name over $extract_dir..."
-				if [[ $jar_name == *zip ]] || [[ $jar_name == *jar ]]; then
-					unzip -q $jar_name -d $extract_dir
+				echo "Uncompressing $file_name over $extract_dir..."
+				if [[ $file_name == *zip ]] || [[ $file_name == *jar ]]; then
+					unzip -q $file_name -d $extract_dir
 				else
 					# some debug-image tar has parent folder ... strip it
 					if tar --version 2>&1 | grep GNU 2>&1; then
-						gzip -cd $jar_name | tar xof - -C $extract_dir --strip 1
+						gzip -cd $file_name | tar xof - -C $extract_dir --strip 1
 					else
-						mkdir dir.$$ && cd dir.$$ && gzip -cd ../$jar_name | tar xof - && cd * && tar cf - . | (cd ../../$extract_dir && tar xpf -) && cd ../.. && rm -rf dir.$$
+						mkdir dir.$$ && cd dir.$$ && gzip -cd ../$file_name | tar xof - && cd * && tar cf - . | (cd ../../$extract_dir && tar xpf -) && cd ../.. && rm -rf dir.$$
 					fi
 				fi
 			else
-				if [ -d "$SDKDIR/openjdkbinary/tmp" ]; then
-					rm -rf $SDKDIR/openjdkbinary/tmp/*
+				if [ -d "$SDKDIR/jdkbinary/tmp" ]; then
+					rm -rf $SDKDIR/jdkbinary/tmp/*
 				else
-					mkdir $SDKDIR/openjdkbinary/tmp
+					mkdir $SDKDIR/jdkbinary/tmp
 				fi
-				echo "Uncompressing file: $jar_name ..."
-				if [[ $jar_name == *zip ]] || [[ $jar_name == *jar ]]; then
-					unzip -q $jar_name -d ./tmp
-				elif [[ $jar_name == *.pax* ]]; then
+				echo "Uncompressing file: $file_name ..."
+				if [[ $file_name == *zip ]] || [[ $file_name == *jar ]]; then
+					unzip -q $file_name -d ./tmp
+				elif [[ $file_name == *.pax* ]]; then
 					cd ./tmp
-					pax -p xam -rzf ../$jar_name
+					pax -p xam -rzf ../$file_name
 				else
-					gzip -cd $jar_name | (cd tmp && tar xof -)
+					gzip -cd $file_name | (cd tmp && tar xof -)
 				fi
 
-				cd $SDKDIR/openjdkbinary/tmp
+				cd $SDKDIR/jdkbinary/tmp
 				jar_dirs=`ls -d */`
 				jar_dir_array=(${jar_dirs//\\n/ })
 				len=${#jar_dir_array[@]}
@@ -429,9 +430,10 @@ getBinaryOpenjdk()
 				elif [ "$len" -gt 1 ]; then
 					mv ../tmp ../j2sdk-image
 				fi
-				cd $SDKDIR/openjdkbinary
+				cd $SDKDIR/jdkbinary
 			fi
-		done
+		fi
+	done
 
 	if [ "$PLATFORM" = "s390x_zos" ]; then
 		chmod -R 755 j2sdk-image
@@ -442,7 +444,7 @@ checkURL() {
 	local filename="$1"
 	if [[ $filename =~ "test-image" ]]; then
 		required=$TEST_IMAGES_REQUIRED
-	elif [[ $filename =~ "debug-image" ]] || [[ "$jar_name" =~ "debugimage" ]]; then
+	elif [[ $filename =~ "debug-image" ]] || [[ "$file_name" =~ "debugimage" ]]; then
 		required=$DEBUG_IMAGES_REQUIRED
 	fi
 }
@@ -583,81 +585,99 @@ getFunctionalTestMaterial()
 	fi
 
 	rm -rf openj9
+}
 
-	if [ "$VENDOR_REPOS" != "" ]; then
-		declare -a vendor_repos_array
-		declare -a vendor_branches_array
-		declare -a vendor_shas_array
-		declare -a vendor_dirs_array
+getVendorTestMaterial() {
+	echo "get vendor test material..."
+	cd $TESTDIR
 
-		# convert VENDOR_REPOS to array
-		vendor_repos_array=(`echo $VENDOR_REPOS | sed 's/,/\n/g'`)
+	declare -a vendor_repos_array
+	declare -a vendor_branches_array
+	declare -a vendor_shas_array
+	declare -a vendor_dirs_array
 
-		if [ "$VENDOR_BRANCHES" != "" ]; then
-			# convert VENDOR_BRANCHES to array
-			vendor_branches_array=(`echo $VENDOR_BRANCHES | sed 's/,/\n/g'`)
-		fi
+	# convert VENDOR_REPOS to array
+	vendor_repos_array=(`echo $VENDOR_REPOS | sed 's/,/\n/g'`)
 
-		if [ "$VENDOR_SHAS" != "" ]; then
-			#convert VENDOR_SHAS to array
-			vendor_shas_array=(`echo $VENDOR_SHAS | sed 's/,/\n/g'`)
-		fi
-
-		if [ "$VENDOR_DIRS" != "" ]; then
-			#convert VENDOR_DIRS to array
-			vendor_dirs_array=(`echo $VENDOR_DIRS | sed 's/,/\n/g'`)
-		fi
-
-		for i in "${!vendor_repos_array[@]}"; do
-			# clone vendor source
-			repoURL=${vendor_repos_array[$i]}
-			branch=${vendor_branches_array[$i]}
-			sha=${vendor_shas_array[$i]}
-			dir=${vendor_dirs_array[$i]}
-			dest="vendor_${i}"
-
-			branchOption=""
-			if [ "$branch" != "" ]; then
-				branchOption="-b $branch"
-			fi
-
-			echo "git clone ${branchOption} $repoURL $dest"
-			git clone -q --depth 1 $branchOption $repoURL $dest
-
-			if [ "$sha" != "" ]; then
-				cd $dest
-				echo "git fetch -q --unshallow"
-				git fetch -q --unshallow
-				echo "update to $sha"
-				git checkout $sha
-				cd $TESTDIR
-			fi
-
-			# move resources
-			if [ "$dir" != "" ] && [ -d $dest/$dir ]; then
-				echo "Stage $dest/$dir to $TESTDIR/$dir"
-				# already in TESTDIR, thus copy $dir to current directory
-				cp -r $dest/$dir ./
-				if [[ "$PLATFORM" == *"zos"* ]]; then
-					cp -r $dest/.git ./$dir
-				fi
-			else
-				echo "Stage $dest to $TESTDIR"
-				# already in TESTDIR, thus copy the entire vendor repo content to current directory
-				cp -r $dest/* ./
-			fi
-
-			# clean up
-			rm -rf $dest
-		done
+	if [ "$VENDOR_BRANCHES" != "" ]; then
+		# convert VENDOR_BRANCHES to array
+		vendor_branches_array=(`echo $VENDOR_BRANCHES | sed 's/,/\n/g'`)
 	fi
+
+	if [ "$VENDOR_SHAS" != "" ]; then
+		#convert VENDOR_SHAS to array
+		vendor_shas_array=(`echo $VENDOR_SHAS | sed 's/,/\n/g'`)
+	fi
+
+	if [ "$VENDOR_DIRS" != "" ]; then
+		#convert VENDOR_DIRS to array
+		vendor_dirs_array=(`echo $VENDOR_DIRS | sed 's/,/\n/g'`)
+	fi
+
+	for i in "${!vendor_repos_array[@]}"; do
+		# clone vendor source
+		repoURL=${vendor_repos_array[$i]}
+		branch=${vendor_branches_array[$i]}
+		sha=${vendor_shas_array[$i]}
+		dir=${vendor_dirs_array[$i]}
+		dest="vendor_${i}"
+
+		branchOption=""
+		if [ "$branch" != "" ]; then
+			branchOption="-b $branch"
+		fi
+
+		if [[ "$dir" =~ "jck" ]]; then
+			echo "BUILD_LIST is $BUILD_LIST"
+			if [[ "$BUILD_LIST" =~ "jck" || "$BUILD_LIST" =~ "all" ]]; then
+				echo "Remove existing subdir. $repoURL will be used..."
+				rm -rf jck
+			else
+				echo "Skip git clone $repoURL"
+				continue
+			fi
+		fi
+
+		echo "git clone ${branchOption} $repoURL $dest"
+		git clone -q --depth 1 $branchOption $repoURL $dest
+
+		if [ "$sha" != "" ]; then
+			cd $dest
+			echo "git fetch -q --unshallow"
+			git fetch -q --unshallow
+			echo "update to $sha"
+			git checkout $sha
+			cd $TESTDIR
+		fi
+
+		echo "check vendor repo sha"
+		repoName=$(basename $repoURL .git)
+		checkRepoSHA $dest $repoName
+
+		# move resources
+		if [ "$dir" != "" ] && [ -d $dest/$dir ]; then
+			echo "Stage $dest/$dir to $TESTDIR/$dir"
+			# already in TESTDIR, thus copy $dir to current directory
+			cp -r $dest/$dir ./
+			if [[ "$PLATFORM" == *"zos"* ]]; then
+				cp -r $dest/.git ./$dir
+			fi
+		else
+			echo "Stage $dest to $TESTDIR"
+			# already in TESTDIR, thus copy the entire vendor repo content to current directory
+			cp -r $dest/* ./
+		fi
+
+		# clean up
+		rm -rf $dest
+	done
 }
 
 testJavaVersion()
 {
 	# use environment variable TEST_JDK_HOME to run java -version
 	if [ "$TEST_JDK_HOME" = "" ]; then
-		TEST_JDK_HOME=$SDKDIR/openjdkbinary/j2sdk-image
+		TEST_JDK_HOME=$SDKDIR/jdkbinary/j2sdk-image
 	fi
 	_java=${TEST_JDK_HOME}/bin/java
 	_release=${TEST_JDK_HOME}/release
@@ -781,4 +801,8 @@ fi
 
 if [ $CLONE_OPENJ9 != "false" ]; then
 	getFunctionalTestMaterial
+fi
+
+if [ "$VENDOR_REPOS" != "" ]; then
+	getVendorTestMaterial
 fi
